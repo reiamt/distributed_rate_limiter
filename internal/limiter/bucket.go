@@ -43,3 +43,41 @@ func (tb *TokenBucket) Allow() bool {
 
 	return false
 }
+
+type Manager struct {
+	mu		sync.RWMutex
+	buckets	map[string]*TokenBucket
+	rate	float64
+	capacity float64
+}
+
+func NewManager(capacity, rate float64) *Manager {
+	return &Manager{
+		buckets:	make(map[string]*TokenBucket),
+		rate:		rate,
+		capacity:	capacity,
+	}
+}
+
+func (m *Manager) GetBucket(key string) *TokenBucket {
+	// readlock; check if bucket already exists
+	m.mu.RLock()
+	bucket, exists := m.buckets[key]
+	m.mu.RUnlock()
+
+	if exists {
+		return bucket
+	}
+
+	// writelock; create new bucket
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if bucket, exists = m.buckets[key]; exists {
+		return bucket
+	}
+
+	newBucket :=  NewTokenBucket(m.capacity, m.rate)
+	m.bucket[key] = newBucket
+	return newBucket
+}

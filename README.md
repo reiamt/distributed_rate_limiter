@@ -26,3 +26,6 @@ I've chosen to put the main.go in a cmd/server folder, to have the possibility t
 ### Token Bucket Algorithm
 Instead of a simple counter, the token bucket algorithm is a rate-controlled system defined by two parameters: Capacity(b) and Refill Rate (r).
 This makes the algorithm robust for burstiness as the user can instantly use b tokens after not having made a request for a while but is then throttled to r requests per second.
+
+### bucket.go
+The `bucket.go` file contains the core token bucket algorithm logic as well as a manger to handle buckets for multiple users. It features a getbucket method that uses the check-lock-check pattern for high-concurrent environments.
