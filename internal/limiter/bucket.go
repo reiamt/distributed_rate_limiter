@@ -36,8 +36,8 @@ func (tb *TokenBucket) Allow() bool {
 	}
 	tb.lastTick = now
 
-	if tb.tokens > 1 {
-		tb.tokens--
+	if tb.tokens > 1.0 {
+		tb.tokens -= 1.0
 		return true
 	}
 
@@ -78,6 +78,11 @@ func (m *Manager) GetBucket(key string) *TokenBucket {
 	}
 
 	newBucket :=  NewTokenBucket(m.capacity, m.rate)
-	m.bucket[key] = newBucket
+	m.buckets[key] = newBucket
 	return newBucket
+}
+
+func (m *Manager) Allow(ip string) bool {
+	bucket := m.GetBucket(ip)
+	return bucket.Allow()
 }
