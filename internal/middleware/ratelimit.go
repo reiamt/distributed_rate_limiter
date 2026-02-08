@@ -14,11 +14,15 @@ type RateLimitMiddleware struct {
 }
 
 func (m *RateLimitMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	} 
-	slog.Info("rate limit check", "original", r.RemoteAddr, "key", host)
+	var err error
+	host := r.Header.Get("X-Real-IP")
+	if host == "" {
+		host, _, err = net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			host = r.RemoteAddr
+		} 
+	}
+	slog.Info("rate limit check", "host", host)
 
 	// check if tokens available for this ip
 	result := m.manager.Allow(host)

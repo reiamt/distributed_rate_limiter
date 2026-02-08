@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"context"
 	"io"
+	"os"
 
 	"distributed_rate_limiter/internal/config"
 	"distributed_rate_limiter/internal/limiter"
@@ -43,7 +44,8 @@ func main() {
 	wrappedServer := middleware.NewRateLimiter(mgr, finalHandler)
 
 	port := cfg.Port
-	slog.Info("server starting on http://localhost", "port", port)
+	hostname, _ := os.Hostname()
+	slog.Info("server starting", "host", hostname, "port", port)
 	slog.Info("try refreshing your browser quickly to trigger the limit...")
 
 	
