@@ -2,12 +2,14 @@ package limiter
 
 import (
 	"context"
+	"log/slog"
 	"fmt"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
 
+// lua script for sliding window
 var slidingWindowScript = redis.NewScript(`
 local key = KEYS[1]
 local window = tonumber(ARGV[1])
@@ -46,7 +48,7 @@ func (rm *RedisManager) Allow(ip string) bool {
 	// atomic increment + expire via lua script
 	count, err := slidingWindowScript.Run(ctx, rm.client, []string{key}, window, now).Int64() 
 	if err != nil {
-		fmt.Printf("Redis error: %v\n", err)
+		slog.Error("redis error", "err", err)
 		return false // when redis fails, block traffic
 	}
 

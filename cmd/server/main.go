@@ -2,18 +2,21 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
+	"distributed_rate_limiter/internal/config"
 	"distributed_rate_limiter/internal/limiter"
 	"distributed_rate_limiter/internal/middleware"
 )
 
 func main() {
+	cfg := config.Load()
 	//local
 	//mgr := limiter.NewManager(5,1)
 	//redis
-	mgr := limiter.NewRedisManager("localhost:6379", 5)
+	mgr := limiter.NewRedisManager(cfg.RedisAddr, cfg.RateLimit)
 
 	// this is the resource, the user wants to access and is protected by the rate limiter
 	finalHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -24,12 +27,12 @@ func main() {
 
 	wrappedServer := middleware.NewRateLimiter(mgr, finalHandler)
 
-	port := ":8080"
-	fmt.Printf("Server is starting on http://localhost%s\n", port)
-	fmt.Println("Try refreshing your browser quickly to trigger the limit...")
+	port := cfg.Port
+	slog.Info("server starting on http://localhost", "port", port)
+	slog.Info("try refreshing your browser quickly to trigger the limit...")
 
 	err := http.ListenAndServe(port, wrappedServer)
 	if err != nil {
-		fmt.Printf("Server failed to start: %v\n", err)
+		slog.Error("server failed to start", "error", err)
 	}
 }

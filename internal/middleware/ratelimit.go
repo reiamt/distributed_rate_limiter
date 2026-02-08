@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"distributed_rate_limiter/internal/limiter"
@@ -17,11 +17,11 @@ func (m *RateLimitMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		host = r.RemoteAddr
 	} 
-	fmt.Printf("Rate Limit Check | Original: %s | Key Used: %s\n", r.RemoteAddr, host)
+	slog.Info("rate limit check", "original", r.RemoteAddr, "key", host)
 
 	// check if tokens available for this ip
 	if !m.manager.Allow(host) {
-		fmt.Printf(">>> BLOCKED: %s\n", host)
+		slog.Warn("blocked", "ip", host)
 		http.Error(w, "Too many requests", http.StatusTooManyRequests)
 		return
 	}
