@@ -4,6 +4,8 @@ import (
 	"testing"
 	"net/http"
 	"net/http/httptest"
+
+	"distributed_rate_limiter/internal/limiter"
 )
 
 // create mock for Limiter
@@ -12,9 +14,9 @@ type mockLimiter struct {
 	lastIP	string
 }
 
-func (m *mockLimiter) Allow(ip string) bool {
+func (m *mockLimiter) Allow(ip string) limiter.Result {
 	m.lastIP = ip
-	return m.allowed
+	return limiter.Result{Allowed: m.allowed}
 }
 
 func TestRateLimiter(t *testing.T) {

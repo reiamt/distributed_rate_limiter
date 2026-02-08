@@ -3,6 +3,7 @@ package limiter
 import (
 	"sync"
 	"time"
+	"context"
 )
 
 type TokenBucket struct {
@@ -22,7 +23,7 @@ func NewTokenBucket(capacity, rate float64) *TokenBucket {
 	}
 }
 
-func (tb *TokenBucket) Allow() bool {
+func (tb *TokenBucket) Allow() Result {
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
 
@@ -38,10 +39,20 @@ func (tb *TokenBucket) Allow() bool {
 
 	if tb.tokens >= 1.0 {
 		tb.tokens -= 1.0
-		return true
+		return Result{
+			Allowed: true,
+			Limit: int(tb.capacity),
+			Remaining: int(tb.tokens),
+			ResetAt: time.Now().Unix() + int64(1/tb.rate),
+		}
 	}
 
-	return false
+	return Result{
+		Allowed: false,
+		Limit: int(tb.capacity),
+		Remaining: 0,
+		ResetAt: time.Now().Unix() + int64(1/tb.rate),
+	}
 }
 
 type Manager struct {
@@ -82,7 +93,30 @@ func (m *Manager) GetBucket(key string) *TokenBucket {
 	return newBucket
 }
 
-func (m *Manager) Allow(ip string) bool {
+func (m *Manager) Allow(ip string) Result {
 	bucket := m.GetBucket(ip)
 	return bucket.Allow()
+}
+
+func (m *Manager) StartCleanup(ctx context.Context, interval, maxIdle time.Duration) {
+	ticker := time.NewTicker(interval)
+	go func() {
+		for {
+			select {
+			case <- ticker.C:
+				m.mu.Lock()
+				for key, bucket := range m.buckets {
+					bucket.mu.Lock()
+					if time.Since(bucket.lastTick) > maxIdle {
+						delete(m.buckets, key)
+					}
+					bucket.mu.Unlock()
+				}
+				m.mu.Unlock()
+			case <- ctx.Done():
+				ticker.Stop()
+				return
+			}
+		}
+	}()
 }

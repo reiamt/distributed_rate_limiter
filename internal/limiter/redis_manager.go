@@ -39,7 +39,7 @@ func NewRedisManager(addr string, limit int) *RedisManager {
 	}
 }
 
-func (rm *RedisManager) Allow(ip string) bool {
+func (rm *RedisManager) Allow(ip string) Result {
 	ctx := context.Background()
 	key := fmt.Sprintf("rate:%s", ip)
 	now := time.Now().UnixMicro()
@@ -49,8 +49,22 @@ func (rm *RedisManager) Allow(ip string) bool {
 	count, err := slidingWindowScript.Run(ctx, rm.client, []string{key}, window, now).Int64() 
 	if err != nil {
 		slog.Error("redis error", "err", err)
-		return false // when redis fails, block traffic
+		return Result{
+			Allowed: false,
+			Limit: rm.limit,
+			Remaining: max(rm.limit - int(count), 0),
+			ResetAt: time.Now().Unix() + 60,
+		} // when redis fails, block traffic
 	}
+	
+	return Result{
+		Allowed: int(count) <= rm.limit,
+		Limit: rm.limit,
+		Remaining: max(rm.limit - int(count), 0),
+		ResetAt: time.Now().Unix() + 60,
+	}
+}
 
-	return int(count) <= rm.limit
+func (rm *RedisManager) Close() error {
+	return rm.client.Close()
 }

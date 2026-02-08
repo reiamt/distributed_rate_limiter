@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strconv"
 	"distributed_rate_limiter/internal/limiter"
 )
 
@@ -20,11 +21,19 @@ func (m *RateLimitMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	slog.Info("rate limit check", "original", r.RemoteAddr, "key", host)
 
 	// check if tokens available for this ip
-	if !m.manager.Allow(host) {
+	result := m.manager.Allow(host)
+	if !result.Allowed {
 		slog.Warn("blocked", "ip", host)
+		w.Header().Set("X-RateLimit-Limit", strconv.Itoa(result.Limit))
+		w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(result.Remaining))
+		w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(result.ResetAt, 10))
 		http.Error(w, "Too many requests", http.StatusTooManyRequests)
 		return
 	}
+
+	w.Header().Set("X-RateLimit-Limit", strconv.Itoa(result.Limit))
+	w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(result.Remaining))
+	w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(result.ResetAt, 10))
 
 	// test passed, serve next request
 	m.next.ServeHTTP(w, r)
