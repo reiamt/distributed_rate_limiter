@@ -5,6 +5,9 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+	"os/signal"
+	"syscall"
+	"context"
 
 	"distributed_rate_limiter/internal/config"
 	"distributed_rate_limiter/internal/limiter"
@@ -31,8 +34,27 @@ func main() {
 	slog.Info("server starting on http://localhost", "port", port)
 	slog.Info("try refreshing your browser quickly to trigger the limit...")
 
-	err := http.ListenAndServe(port, wrappedServer)
-	if err != nil {
-		slog.Error("server failed to start", "error", err)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	
+	svr := &http.Server{Addr: port, Handler: wrappedServer}
+	
+	// run listenandserver as goroutine
+	go func() {
+		if err := svr.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("server failed to start", "error", err)
+		}
+	}()
+
+	<-ctx.Done() //blocks until ctrl+C is pressed, then shutting down
+	slog.Info("shutting down server...")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := svr.Shutdown(shutdownCtx); err != nil {
+		slog.Error("shutdown error", "error", err)
 	}
+
+	slog.Info("server stopped")
 }
