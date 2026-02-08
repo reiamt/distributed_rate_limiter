@@ -2,8 +2,8 @@ package limiter
 
 import (
 	"context"
-	"log/slog"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -24,8 +24,8 @@ return count
 `)
 
 type RedisManager struct {
-	client	*redis.Client
-	limit	int
+	client *redis.Client
+	limit  int
 }
 
 func NewRedisManager(addr string, limit int) *RedisManager {
@@ -34,8 +34,8 @@ func NewRedisManager(addr string, limit int) *RedisManager {
 	})
 
 	return &RedisManager{
-		client:	rdb,
-		limit:	limit,
+		client: rdb,
+		limit:  limit,
 	}
 }
 
@@ -46,25 +46,34 @@ func (rm *RedisManager) Allow(ip string) Result {
 	window := int64(60 * 1e6) // 60 secs in microsecs
 
 	// atomic increment + expire via lua script
-	count, err := slidingWindowScript.Run(ctx, rm.client, []string{key}, window, now).Int64() 
+	count, err := slidingWindowScript.Run(ctx, rm.client, []string{key}, window, now).Int64()
 	if err != nil {
 		slog.Error("redis error", "err", err)
 		return Result{
-			Allowed: false,
-			Limit: rm.limit,
-			Remaining: max(rm.limit - int(count), 0),
-			ResetAt: time.Now().Unix() + 60,
+			Allowed:   false,
+			Limit:     rm.limit,
+			Remaining: max(rm.limit-int(count), 0),
+			ResetAt:   time.Now().Unix() + 60,
 		} // when redis fails, block traffic
 	}
-	
+
 	return Result{
-		Allowed: int(count) <= rm.limit,
-		Limit: rm.limit,
-		Remaining: max(rm.limit - int(count), 0),
-		ResetAt: time.Now().Unix() + 60,
+		Allowed:   int(count) <= rm.limit,
+		Limit:     rm.limit,
+		Remaining: max(rm.limit-int(count), 0),
+		ResetAt:   time.Now().Unix() + 60,
 	}
 }
 
 func (rm *RedisManager) Close() error {
 	return rm.client.Close()
+}
+
+func (rm *RedisManager) Ping() bool {
+	ctx := context.Background()
+	pong, _ := rm.client.Ping(ctx).Result()
+	if pong != "PONG" {
+		return false
+	}
+	return true
 }

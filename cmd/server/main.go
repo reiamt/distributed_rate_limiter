@@ -1,15 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
-	"time"
+	"os"
 	"os/signal"
 	"syscall"
-	"context"
-	"io"
-	"os"
+	"time"
 
 	"distributed_rate_limiter/internal/config"
 	"distributed_rate_limiter/internal/limiter"
@@ -32,7 +32,7 @@ func main() {
 	default:
 		slog.Error("unknown mode", "mode", cfg.Mode)
 		return
-	}	
+	}
 
 	// this is the resource, the user wants to access and is protected by the rate limiter
 	finalHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -48,10 +48,23 @@ func main() {
 	slog.Info("server starting", "host", hostname, "port", port)
 	slog.Info("try refreshing your browser quickly to trigger the limit...")
 
-	
-	
-	svr := &http.Server{Addr: port, Handler: wrappedServer}
-	
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		if p, ok := mgr.(interface{ Ping() bool }); ok {
+			if !p.Ping() {
+				w.WriteHeader((http.StatusServiceUnavailable))
+				return
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.Handle("/", wrappedServer)
+
+	svr := &http.Server{Addr: port, Handler: mux}
+
 	// run listenandserver as goroutine
 	go func() {
 		if err := svr.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -69,6 +82,8 @@ func main() {
 		slog.Error("shutdown error", "error", err)
 	}
 
-	if c, ok := mgr.(io.Closer); ok { c.Close() }
+	if c, ok := mgr.(io.Closer); ok {
+		c.Close()
+	}
 	slog.Info("server stopped")
 }
