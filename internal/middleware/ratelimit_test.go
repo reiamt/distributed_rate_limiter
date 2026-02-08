@@ -17,60 +17,50 @@ func (m *mockLimiter) Allow(ip string) bool {
 	return m.allowed
 }
 
-func TestRateLimiterAllowed(t *testing.T) {
-	mockLmtr := &mockLimiter{allowed: true}
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-	newRateLmtr := NewRateLimiter(mockLmtr, next)
-
-	req := httptest.NewRequest("GET", "/", nil)
-	req.RemoteAddr = "192.168.1.1:12345"
-	rec := httptest.NewRecorder() // captures what handler writes
-
-	// request is allowed
-	newRateLmtr.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("Expected 200, got %d", rec.Code)
+func TestRateLimiter(t *testing.T) {
+	tests := []struct {
+		name		string
+		allowed		bool
+		remoteAddr	string
+		wantCode	int
+		wantIP		string
+	}{
+		{
+			name:		"allowed request returns 200",
+			allowed:	true,
+			remoteAddr: "192.168.1.1:12345",
+			wantCode:	http.StatusOK,
+			wantIP:		"192.168.1.1",
+		},
+		{
+			name:		"blocked request returns 429",
+			allowed:	false,
+			remoteAddr: "192.168.1.1:12345",
+			wantCode:	http.StatusTooManyRequests,
+			wantIP:		"192.168.1.1",
+		},
 	}
-} 
 
-func TestRateLimiterBlocked(t *testing.T) {
-	mockLmtr := &mockLimiter{allowed: false}
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-	newRateLmtr := NewRateLimiter(mockLmtr, next)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mockLmtr := &mockLimiter{allowed: tc.allowed}
+			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			})
+			newRateLmtr := NewRateLimiter(mockLmtr, next)
 
-	req := httptest.NewRequest("GET", "/", nil)
-	req.RemoteAddr = "192.168.1.1:12345"
-	rec := httptest.NewRecorder()
-
-	// request is blocked
-	newRateLmtr.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusTooManyRequests {
-		t.Errorf("Expected 429, got %d", rec.Code)
-	}
-}
-
-func TestRateLimiterIPExtraction(t *testing.T) {
-	mockLmtr := &mockLimiter{allowed: true}
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-	newRateLmtr := NewRateLimiter(mockLmtr, next)
-
-
-	req := httptest.NewRequest("GET", "/", nil)
-	req.RemoteAddr = "192.168.1.1:12345"
-	rec := httptest.NewRecorder()
-
-	// request is allowed
-	newRateLmtr.ServeHTTP(rec, req)
-
-	if mockLmtr.lastIP != "192.168.1.1" {
-		t.Errorf("Expected 192.168.1.1, got %s", mockLmtr.lastIP)
+			req := httptest.NewRequest("GET", "/", nil)
+			req.RemoteAddr = tc.remoteAddr
+			rec := httptest.NewRecorder() //captures what handler writes
+			
+			newRateLmtr.ServeHTTP(rec, req)
+			if rec.Code != tc.wantCode {
+				t.Errorf("Expected %d, got %d", tc.wantCode, rec.Code)
+			}
+			
+			if mockLmtr.lastIP != tc.wantIP {
+				t.Errorf("Expected %s, got %s", tc.wantIP, mockLmtr.lastIP)
+			}
+		})
 	}
 }
