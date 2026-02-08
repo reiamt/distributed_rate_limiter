@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 	"context"
+	"io"
 
 	"distributed_rate_limiter/internal/config"
 	"distributed_rate_limiter/internal/limiter"
@@ -16,10 +17,21 @@ import (
 
 func main() {
 	cfg := config.Load()
-	//local
-	//mgr := limiter.NewManager(5,1)
-	//redis
-	mgr := limiter.NewRedisManager(cfg.RedisAddr, cfg.RateLimit)
+	var mgr limiter.Limiter
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+
+	defer stop()
+	switch cfg.Mode {
+	case "local":
+		m := limiter.NewManager(float64(cfg.RateLimit), 1)
+		m.StartCleanup(ctx, 60*time.Second, 5*time.Minute)
+		mgr = m
+	case "redis":
+		mgr = limiter.NewRedisManager(cfg.RedisAddr, cfg.RateLimit)
+	default:
+		slog.Error("unknown mode", "mode", cfg.Mode)
+		return
+	}	
 
 	// this is the resource, the user wants to access and is protected by the rate limiter
 	finalHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -34,8 +46,7 @@ func main() {
 	slog.Info("server starting on http://localhost", "port", port)
 	slog.Info("try refreshing your browser quickly to trigger the limit...")
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
+	
 	
 	svr := &http.Server{Addr: port, Handler: wrappedServer}
 	
@@ -56,5 +67,6 @@ func main() {
 		slog.Error("shutdown error", "error", err)
 	}
 
+	if c, ok := mgr.(io.Closer); ok { c.Close() }
 	slog.Info("server stopped")
 }
