@@ -8,6 +8,14 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+var incrWithExpire = redis.NewScript(`
+local count = redis.call("INCR", KEYS[1])
+if count == 1 then
+	redis.call("EXPIRE", KEYS[1], ARGV[1])
+end
+return count
+`)
+
 type RedisManager struct {
 	client	*redis.Client
 	limit	int
@@ -30,16 +38,11 @@ func (rm *RedisManager) Allow(ip string) bool {
 	// create unique key for user (ip) for current minute
 	key := fmt.Sprintf("rate:%s:%s", ip, time.Now().Format("15:04"))
 
-	// atomic increment
-	count, err := rm.client.Incr(ctx, key).Result()
+	// atomic increment + expire via lua script
+	count, err := incrWithExpire.Run(ctx, rm.client, []string{key}, 60).Int64()
 	if err != nil {
 		fmt.Printf("Redis error: %v\n", err)
-		return false // when redis fail, allow traffic
-	}
-
-	// if its new key, set it to expire
-	if count == 1 {
-		rm.client.Expire(ctx, key, time.Minute)
+		return false // when redis fails, block traffic
 	}
 
 	return int(count) <= rm.limit
