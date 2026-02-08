@@ -55,7 +55,7 @@ func main() {
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		if p, ok := mgr.(interface{ Ping() bool }); ok {
 			if !p.Ping() {
-				w.WriteHeader((http.StatusServiceUnavailable))
+				w.WriteHeader(http.StatusServiceUnavailable)
 				return
 			}
 		}
