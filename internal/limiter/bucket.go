@@ -36,7 +36,7 @@ func (tb *TokenBucket) Allow() bool {
 	}
 	tb.lastTick = now
 
-	if tb.tokens > 1.0 {
+	if tb.tokens >= 1.0 {
 		tb.tokens -= 1.0
 		return true
 	}
