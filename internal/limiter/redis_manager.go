@@ -8,11 +8,16 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-var incrWithExpire = redis.NewScript(`
-local count = redis.call("INCR", KEYS[1])
-if count == 1 then
-	redis.call("EXPIRE", KEYS[1], ARGV[1])
-end
+var slidingWindowScript = redis.NewScript(`
+local key = KEYS[1]
+local window = tonumber(ARGV[1])
+local now = tonumber(ARGV[2])
+
+redis.call("ZREMRANGEBYSCORE", key, 0, now - window)
+redis.call("ZADD", key, now, tostring(now))
+local count = redis.call("ZCARD", key)
+redis.call("EXPIRE", key, math.ceil(window / 1000000))
+
 return count
 `)
 
@@ -34,12 +39,12 @@ func NewRedisManager(addr string, limit int) *RedisManager {
 
 func (rm *RedisManager) Allow(ip string) bool {
 	ctx := context.Background()
-	
-	// create unique key for user (ip) for current minute
-	key := fmt.Sprintf("rate:%s:%s", ip, time.Now().Format("15:04"))
+	key := fmt.Sprintf("rate:%s", ip)
+	now := time.Now().UnixMicro()
+	window := int64(60 * 1e6) // 60 secs in microsecs
 
 	// atomic increment + expire via lua script
-	count, err := incrWithExpire.Run(ctx, rm.client, []string{key}, 60).Int64()
+	count, err := slidingWindowScript.Run(ctx, rm.client, []string{key}, window, now).Int64() 
 	if err != nil {
 		fmt.Printf("Redis error: %v\n", err)
 		return false // when redis fails, block traffic
