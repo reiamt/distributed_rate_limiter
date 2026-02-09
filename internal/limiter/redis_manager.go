@@ -2,6 +2,7 @@ package limiter
 
 import (
 	"context"
+	"distributed_rate_limiter/internal/metrics"
 	"fmt"
 	"log/slog"
 	"time"
@@ -48,6 +49,7 @@ func (rm *RedisManager) Allow(ip string) Result {
 	// atomic increment + expire via lua script
 	count, err := slidingWindowScript.Run(ctx, rm.client, []string{key}, window, now).Int64()
 	if err != nil {
+		metrics.RedisErrorsTotal.Inc()
 		slog.Error("redis error", "err", err)
 		return Result{
 			Allowed:   false,
