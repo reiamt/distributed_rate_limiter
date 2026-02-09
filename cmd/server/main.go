@@ -14,6 +14,8 @@ import (
 	"distributed_rate_limiter/internal/config"
 	"distributed_rate_limiter/internal/limiter"
 	"distributed_rate_limiter/internal/middleware"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
@@ -61,6 +63,7 @@ func main() {
 		}
 		w.WriteHeader(http.StatusOK)
 	})
+	mux.Handle("/metrics", promhttp.Handler())
 	mux.Handle("/", wrappedServer)
 
 	svr := &http.Server{Addr: port, Handler: mux}
