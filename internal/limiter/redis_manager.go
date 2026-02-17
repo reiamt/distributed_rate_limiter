@@ -3,6 +3,7 @@ package limiter
 import (
 	"context"
 	"distributed_rate_limiter/internal/metrics"
+
 	"fmt"
 	"log/slog"
 	"time"
@@ -25,18 +26,23 @@ return count
 `)
 
 type RedisManager struct {
-	client *redis.Client
-	limit  int
+	client   *redis.Client
+	limit    int
+	cb       *CircuitBreaker
+	failOpen bool
 }
 
-func NewRedisManager(addr string, limit int) *RedisManager {
+func NewRedisManager(addr string, limit int, failOpen bool) *RedisManager {
 	rdb := redis.NewClient(&redis.Options{
 		Addr: addr,
 	})
+	cb := NewCircuitBreaker(3, 30*time.Second)
 
 	return &RedisManager{
-		client: rdb,
-		limit:  limit,
+		client:   rdb,
+		limit:    limit,
+		cb:       cb,
+		failOpen: failOpen,
 	}
 }
 
@@ -46,10 +52,21 @@ func (rm *RedisManager) Allow(ip string) Result {
 	now := time.Now().UnixMicro()
 	window := int64(60 * 1e6) // 60 secs in microsecs
 
+	// check circuitbreaker before calling redis
+	if !rm.cb.Allow() {
+		return Result{
+			Allowed:   rm.failOpen,
+			Limit:     rm.limit,
+			Remaining: max(rm.limit-1, 0),
+			ResetAt:   time.Now().Unix() + 60,
+		}
+	}
+
 	// atomic increment + expire via lua script
 	count, err := slidingWindowScript.Run(ctx, rm.client, []string{key}, window, now).Int64()
 	if err != nil {
 		metrics.RedisErrorsTotal.Inc()
+		rm.cb.RecordResult(false)
 		slog.Error("redis error", "err", err)
 		return Result{
 			Allowed:   false,
@@ -58,7 +75,7 @@ func (rm *RedisManager) Allow(ip string) Result {
 			ResetAt:   time.Now().Unix() + 60,
 		} // when redis fails, block traffic
 	}
-
+	rm.cb.RecordResult(true)
 	return Result{
 		Allowed:   int(count) <= rm.limit,
 		Limit:     rm.limit,
