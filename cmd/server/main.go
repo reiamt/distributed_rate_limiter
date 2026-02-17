@@ -30,7 +30,7 @@ func main() {
 		m.StartCleanup(ctx, 60*time.Second, 5*time.Minute)
 		mgr = m
 	case "redis":
-		mgr = limiter.NewRedisManager(cfg.RedisAddr, cfg.RateLimit)
+		mgr = limiter.NewRedisManager(cfg.RedisAddr, cfg.RateLimit, cfg.FailOpen)
 	default:
 		slog.Error("unknown mode", "mode", cfg.Mode)
 		return

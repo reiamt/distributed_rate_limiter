@@ -8,10 +8,11 @@ import (
 )
 
 type Config struct {
-	RedisAddr	string
-	RateLimit	int
-	Port		string
-	Mode		string
+	RedisAddr string
+	RateLimit int
+	Port      string
+	Mode      string
+	FailOpen  bool
 }
 
 func Load() *Config {
@@ -19,8 +20,9 @@ func Load() *Config {
 	cfg := &Config{
 		RedisAddr: "localhost:6379",
 		RateLimit: 5,
-		Port: ":8080",
-		Mode: "redis",
+		Port:      ":8080",
+		Mode:      "redis",
+		FailOpen:  false,
 	}
 
 	if addr := os.Getenv("REDIS_ADDR"); addr != "" {
@@ -41,5 +43,13 @@ func Load() *Config {
 	if mode := os.Getenv("MODE"); mode != "" {
 		cfg.Mode = mode
 	}
+
+	if failOpenTmp, exists := os.LookupEnv("FAIL_OPEN"); exists {
+		failOpen, err := strconv.ParseBool(failOpenTmp)
+		if err == nil {
+			cfg.FailOpen = failOpen
+		}
+	}
+
 	return cfg
 }
