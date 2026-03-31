@@ -1,36 +1,68 @@
 # Distributed Rate Limiter
 
-A production-style distributed rate limiter written in Go, backed by Redis. Implements per-IP rate limiting with two swappable algorithms, atomic Lua scripting, and standard HTTP rate limit headers.
+A production-grade distributed rate limiter written in Go — a core security primitive for DDoS mitigation, API abuse prevention, and infrastructure protection. Enforces per-IP request limits across horizontally scaled services via shared Redis state, with full observability and fault tolerance.
+
+## System Architecture
+
+```mermaid
+graph TD
+    Client["Client"] --> Nginx["nginx\n(Load Balancer :80)"]
+
+    Nginx --> App1["App Replica 1\n:8080"]
+    Nginx --> App2["App Replica 2\n:8080"]
+    Nginx --> App3["App Replica 3\n:8080"]
+
+    App1 & App2 & App3 --> CB["Circuit Breaker"]
+    CB --> Redis["Redis\n(Sliding Window State)"]
+
+    App1 & App2 & App3 --> Prom["Prometheus\n(:9090)"]
+    Prom --> Grafana["Grafana\n(:3000)"]
+
+    subgraph "Per Replica"
+        MW["Rate Limit Middleware"]
+        CB
+        MW --> CB
+    end
+```
+
+**Key property:** all 3 replicas share a single Redis instance. A client exhausting their limit on replica 1 is blocked on replica 2 — the rate limit is enforced globally, not per-process.
+
+## Code Structure
+
+```
+cmd/server/           Entry point, config, signal handling, HTTP routing
+internal/
+├── config/           Environment-based config with .env support
+├── limiter/
+│   ├── limiter.go        Limiter interface + Result struct
+│   ├── bucket.go         Token bucket + Manager (double-checked locking, cleanup goroutine)
+│   ├── redis_manager.go  Redis sliding window via atomic Lua script
+│   └── circuit_breaker.go  Three-state fault tolerance (closed/open/half-open)
+├── middleware/       HTTP middleware — IP extraction, enforcement, response headers
+└── metrics/          Prometheus instrumentation
+```
+
+Algorithm (`limiter/`) is fully decoupled from transport (`middleware/`) via the `Limiter` interface. Backends are swappable at runtime via env var.
 
 ## Features
 
-- **Sliding window algorithm** (Redis) — atomic Lua script using sorted sets, eliminates fixed-window boundary bursts
-- **Token bucket algorithm** (in-memory) — supports burst tolerance with configurable capacity and refill rate
-- **Swappable backends** — `Limiter` interface allows switching between Redis and in-memory via env var
-- **HTTP middleware** — extracts client IP, enforces limits, returns `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset` headers
-- **Graceful shutdown** — signal handling with in-flight request draining and Redis connection cleanup
-- **Dockerized** — multi-stage build, Docker Compose with Redis, one command to run
+**Rate Limiting**
+- **Sliding window** (Redis) — atomic Lua script on sorted sets, eliminates the boundary-burst problem of fixed-window counters
+- **Token bucket** (in-memory) — burst-tolerant with configurable capacity and refill rate; background goroutine evicts idle buckets
+- Standard response headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`
 
-## Architecture
+**Fault Tolerance**
+- **Circuit breaker** — detects Redis failures, opens after N consecutive errors, tests recovery via half-open state, configurable fail-open/fail-closed policy
+- **Graceful shutdown** — drains in-flight requests, closes Redis connections cleanly on SIGINT/SIGTERM
 
-```
-cmd/server/           Entry point, config loading, signal handling
-internal/
-├── config/           Environment-based configuration (godotenv)
-├── limiter/
-│   ├── limiter.go    Limiter interface + Result struct
-│   ├── bucket.go     Token bucket algorithm + Manager with cleanup goroutine
-│   └── redis_manager.go  Redis sliding window via Lua script
-└── middleware/       HTTP rate limiting middleware
-```
+**Observability**
+- **Prometheus metrics** — `ratelimiter_requests_total` (by status), `ratelimiter_request_duration_seconds` (histogram), `ratelimiter_redis_errors_total`
+- **Grafana dashboard** — requests/sec by allow/block status, p99 latency, Redis error rate
+- **Health endpoints** — `/healthz` (liveness), `/readyz` (readiness with Redis ping)
 
-Core design: algorithm (`limiter/`) is separated from transport (`middleware/`). The `Limiter` interface decouples the two, enabling the backend to be swapped without changing the middleware.
-
-## Algorithms
-
-**Sliding Window (Redis):** Stores each request timestamp in a sorted set. On every request, prunes entries outside the window, adds the new entry, and counts — all atomically via a Lua script. Prevents the boundary-burst problem inherent in fixed-window counters.
-
-**Token Bucket (in-memory):** Bucket fills at rate `r` tokens/sec up to capacity `b`. Each request consumes one token. Allows bursts up to `b` after idle periods, then throttles to `r` req/sec. Uses double-checked locking for concurrent bucket creation. A background goroutine cleans up idle buckets to prevent memory leaks.
+**Infrastructure**
+- Multi-stage Docker build (~15MB final image)
+- Docker Compose: 3 app replicas + Redis + nginx + Prometheus + Grafana
 
 ## Quick Start
 
@@ -38,10 +70,11 @@ Core design: algorithm (`limiter/`) is separated from transport (`middleware/`).
 docker compose up --build
 ```
 
-Or run locally:
+Hit `http://localhost` — after 5 requests the limiter engages. Metrics at `http://localhost:9090`, dashboard at `http://localhost:3000`.
 
+Run locally:
 ```bash
-# set env vars in .env or export them
+cp .env.example .env  # configure env vars
 go run ./cmd/server
 ```
 
@@ -49,10 +82,11 @@ go run ./cmd/server
 
 | Variable | Default | Description |
 |---|---|---|
-| `MODE` | `redis` | `redis` or `local` |
-| `REDIS_ADDR` | `localhost:6379` | Redis connection address |
-| `RATELIMIT` | `5` | Max requests per window |
-| `PORT` | `:8080` | Server listen port |
+| `MODE` | `redis` | `redis` (distributed) or `local` (in-memory) |
+| `REDIS_ADDR` | `localhost:6379` | Redis address |
+| `RATELIMIT` | `5` | Max requests per 60s window |
+| `PORT` | `:8080` | Listen port |
+| `FAIL_OPEN` | `false` | Allow traffic when Redis is unreachable |
 
 ## Tests
 
@@ -60,12 +94,16 @@ go run ./cmd/server
 go test ./...
 ```
 
-Unit tests cover token bucket logic (capacity, refill, ceiling), manager (per-key isolation, pointer identity), and middleware (status codes, IP extraction) using table-driven tests and interface mocking.
+- **Token bucket** — capacity enforcement, refill over time, ceiling cap
+- **Manager** — per-key isolation, pointer identity, concurrent access
+- **Circuit breaker** — all state transitions (closed → open → half-open → closed/open)
+- **Middleware** — status codes (200/429), IP extraction, interface mocking
 
-## Concurrency Patterns Used
+## Concurrency & Distributed Systems Patterns
 
-- `sync.Mutex` for token bucket state
-- `sync.RWMutex` with double-checked locking for bucket map access
-- Goroutine + `time.Ticker` + `select` for background cleanup
-- `signal.NotifyContext` for graceful shutdown
-- Atomic Redis operations via Lua scripting
+- `sync.RWMutex` with double-checked locking for concurrent bucket map access
+- `sync.Mutex` for token bucket and circuit breaker state
+- Goroutine + `time.Ticker` + `select` for background cleanup with context-aware shutdown
+- `signal.NotifyContext` for coordinated graceful shutdown across goroutines
+- Atomic Redis operations via Lua scripting (INCR + EXPIRE race condition eliminated)
+- DNS-based service discovery for Prometheus scraping across replicas
