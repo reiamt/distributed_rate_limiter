@@ -58,6 +58,8 @@ Algorithm (`limiter/`) is fully decoupled from transport (`middleware/`) via the
 **Observability**
 - **Prometheus metrics** — `ratelimiter_requests_total` (by status), `ratelimiter_request_duration_seconds` (histogram), `ratelimiter_redis_errors_total`
 - **Grafana dashboard** — requests/sec by allow/block status, p99 latency, Redis error rate
+
+![Grafana Dashboard](docs/grafana_dashboard.png)
 - **Health endpoints** — `/healthz` (liveness), `/readyz` (readiness with Redis ping)
 
 **Infrastructure**
