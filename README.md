@@ -1,4 +1,4 @@
-![CI](https://github.com/reiamt/distributed_rate_limiter/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/reiamt/distributed_rate_limiter/actions/workflows/ci.yml/badge.svg?branch=main)
 
 # Distributed Rate Limiter
 
