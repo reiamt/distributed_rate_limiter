@@ -1,3 +1,5 @@
+![CI](https://github.com/reiamt/distributed_rate_limiter/actions/workflows/ci.yml/badge.svg)
+
 # Distributed Rate Limiter
 
 A production-grade distributed rate limiter written in Go — a core security primitive for DDoS mitigation, API abuse prevention, and infrastructure protection. Enforces per-IP request limits across horizontally scaled services via shared Redis state, with full observability and fault tolerance.
